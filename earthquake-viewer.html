@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リアルタイム地震ビューアー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--f:"BIZ UDPGothic","BIZ UDGothic","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif}
+*{box-sizing:border-box;font-family:var(--f)}
+html,body{height:100%;margin:0}
+body{background:#12151a;color:#e6e9ee;font-size:14px;line-height:1.5}
+button{font-size:inherit;color:inherit}
+:focus-visible{outline:2px solid #7cc4ff;outline-offset:2px}
+
+.app{display:grid;grid-template-columns:minmax(0,1fr) 320px;height:100%}
+.mapwrap{position:relative;min-height:0}
+#map{position:absolute;inset:0;background:#0d1014}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.55)}
+.leaflet-container,.leaflet-bar a,.leaflet-control-attribution,.leaflet-tooltip{font-family:var(--f)}
+
+#side{background:#12151a;border-left:1px solid #252b35;overflow:auto;min-height:0}
+.head{position:sticky;top:0;z-index:5;background:#12151a;padding:10px 12px;border-bottom:1px solid #252b35;display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.head h1{font-size:15px;font-weight:700;margin:0;flex:1 1 100%}
+.clock{min-width:112px}
+.ctime{font-size:26px;font-weight:700;line-height:1.1;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+.ctrl{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.chip{font-size:12px;padding:2px 10px;border-radius:12px;background:#1b212b}
+.chip.ok{color:#4cc38a}.chip.wait{color:#f2d34a}.chip.ng{color:#f08a5d}
+.snd{font-size:12px;background:#1b212b;border:1px solid #2c3441;border-radius:6px;padding:3px 10px;cursor:pointer}
+.snd:hover{background:#232a36}
+
+#detail{padding:10px 12px;border-bottom:1px solid #252b35}
+.muted{color:#9aa4b2;font-size:12px}
+.badge{flex:none;min-width:40px;text-align:center;border-radius:6px;padding:2px 6px;font-weight:700;font-size:13px}
+.big{font-size:18px;padding:6px 10px;min-width:56px}
+.pc{display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;font-size:12px;background:#1b212b;border-radius:4px;padding:1px 6px}
+.pc i{width:10px;height:10px;border-radius:2px;display:inline-block}
+
+.item{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid #1d232c;padding:8px 12px;cursor:pointer}
+.item:hover{background:#171c24}
+.item.sel{background:#1b212b}
+.item .n{font-weight:700}
+.empty{padding:16px 12px;color:#9aa4b2}
+.foot{padding:10px 12px;font-size:11px;color:#7d8794}
+
+#banners{position:absolute;top:10px;left:10px;right:10px;z-index:1000;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.banner{pointer-events:auto;display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;font-size:13px;color:#fff;max-width:560px}
+.banner b{display:block;font-size:14px}
+.banner.eew{background:#c62828}
+.banner.tsu{background:#a85a00}
+.banner.info{background:#1f4e8c}
+.banner .x{margin-left:auto;background:none;border:0;font-size:18px;line-height:1;cursor:pointer;opacity:.85}
+
+.legend{position:absolute;left:10px;bottom:24px;z-index:900;display:flex;gap:2px;background:rgba(18,21,26,.85);padding:4px;border-radius:6px}
+.legend span{font-size:11px;font-weight:700;padding:1px 5px;border-radius:3px}
+
+.pm{transform:translate(-50%,-50%);white-space:nowrap;font-size:12px;font-weight:700;padding:1px 7px;border-radius:10px;border:1px solid rgba(0,0,0,.45)}
+.eew{position:relative;width:0;height:0}
+.eew i{position:absolute;left:-40px;top:-40px;width:80px;height:80px;border:2px solid #ff5252;border-radius:50%;opacity:0;animation:ring 2.4s ease-out infinite}
+.eew i:nth-child(2){animation-delay:.8s}
+.eew i:nth-child(3){animation-delay:1.6s}
+.eew b{position:absolute;left:-12px;top:-17px;font-size:28px;line-height:1;color:#ff5252}
+@keyframes ring{0%{transform:scale(.1);opacity:.9}100%{transform:scale(2.2);opacity:0}}
+
+.alert{position:fixed;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(120,10,10,.94)}
+.alert[hidden]{display:none}
+.alert-box{width:min(720px,100%);max-height:100%;overflow:auto;background:#c62828;color:#fff;border:3px solid #fff;border-radius:12px;padding:20px;text-align:center}
+.alert-box h2{margin:0;font-size:clamp(28px,6vw,48px);line-height:1.2;font-weight:700}
+.alert-sub{font-size:clamp(16px,3vw,22px);margin:6px 0 14px}
+.a-name{font-size:clamp(22px,5vw,36px);font-weight:700}
+.a-meta{font-size:clamp(14px,2.6vw,18px);margin-top:2px}
+.a-label{margin-top:14px;font-size:13px}
+.a-list{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:6px}
+.a-list span{background:rgba(0,0,0,.28);border-radius:6px;padding:2px 10px;font-size:14px}
+.a-elapsed{margin-top:12px;font-size:14px}
+.alert-foot{margin-top:14px;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.alert-foot button{font-size:16px;padding:8px 18px;border-radius:8px;border:2px solid #fff;background:#fff;color:#8e1b1b;font-weight:700;cursor:pointer}
+.alert-foot button.ghost{background:transparent;color:#fff}
+.alert-foot button[hidden]{display:none}
+@keyframes pulse{0%,100%{background-color:rgba(120,10,10,.94)}50%{background-color:rgba(55,0,0,.97)}}
+
+@media (prefers-reduced-motion:no-preference){.alert{animation:pulse 1.2s ease-in-out infinite}}
+@media (prefers-reduced-motion:reduce){.eew i{animation:none;opacity:.6;transform:scale(.8)}}
+@media (max-width:720px){
+  .app{grid-template-columns:1fr;grid-template-rows:minmax(0,58%) minmax(0,42%)}
+  #side{border-left:0;border-top:1px solid #252b35}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="mapwrap">
+    <div id="map"></div>
+    <div id="banners" aria-live="polite"></div>
+    <div class="legend" id="legend" aria-label="震度の凡例"></div>
+  </div>
+  <aside id="side">
+    <div class="head">
+      <h1>リアルタイム地震ビューアー</h1>
+      <div class="clock" role="timer" aria-label="現在時刻(日本時間)">
+        <div class="ctime" id="ctime">--:--:--</div>
+        <div class="muted" id="cdate">&nbsp;</div>
+      </div>
+      <div class="ctrl">
+        <span class="chip wait" id="status">接続中…</span>
+        <button class="snd" id="snd" type="button">音: OFF</button>
+      </div>
+    </div>
+    <div id="detail"><div class="muted">地震情報を読み込み中です</div></div>
+    <div id="list"></div>
+    <div class="foot">
+      データ: P2P地震情報(気象庁発表の情報) / 地図: 国土地理院<br>
+      遅延や欠落が起こり得ます。防災上の判断には、気象庁などの公式情報を確認してください。
+    </div>
+  </aside>
+</div>
+
+<div class="alert" id="alert" role="alertdialog" aria-modal="true" aria-labelledby="a-title" aria-describedby="a-sub" hidden>
+  <div class="alert-box">
+    <h2 id="a-title">緊急地震速報</h2>
+    <p class="alert-sub" id="a-sub">強い揺れに警戒してください</p>
+    <div id="a-main"></div>
+    <div id="a-areas"></div>
+    <div class="a-elapsed" id="a-elapsed"></div>
+    <div class="alert-foot">
+      <button type="button" class="ghost" id="a-snd" hidden>音を鳴らす</button>
+      <button type="button" id="a-close">閉じて地図を見る</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+'use strict';
+
+var API='https://api.p2pquake.net/v2/history?codes=551&limit=40';
+var WS='wss://api.p2pquake.net/v2/ws';
+var BASE_TITLE=document.title;
+
+var SCALE={10:['1','#a8c8e8'],20:['2','#5fa8e0'],30:['3','#4cc38a'],40:['4','#f2d34a'],45:['5弱','#f29b3d'],46:['5弱以上','#f29b3d'],50:['5強','#e8643c'],55:['6弱','#d63a3a'],60:['6強','#b01e3a'],70:['7','#7a1d7a']};
+function sc(v){return SCALE[v]||['不明','#6b7480'];}
+function fg(v){return (v>=10&&v<=40)?'#12151a':'#ffffff';}
+
+var CENT={'北海道':[43.06,141.35],'青森':[40.82,140.74],'岩手':[39.70,141.15],'宮城':[38.27,140.87],'秋田':[39.72,140.10],'山形':[38.24,140.33],'福島':[37.75,140.47],'茨城':[36.34,140.45],'栃木':[36.57,139.88],'群馬':[36.39,139.06],'埼玉':[35.86,139.65],'千葉':[35.61,140.12],'東京':[35.69,139.69],'神奈川':[35.45,139.64],'新潟':[37.90,139.02],'富山':[36.70,137.21],'石川':[36.59,136.63],'福井':[36.07,136.22],'山梨':[35.66,138.57],'長野':[36.65,138.18],'岐阜':[35.39,136.72],'静岡':[34.98,138.38],'愛知':[35.18,136.91],'三重':[34.73,136.51],'滋賀':[35.00,135.87],'京都':[35.02,135.76],'大阪':[34.69,135.52],'兵庫':[34.69,135.18],'奈良':[34.69,135.83],'和歌山':[34.23,135.17],'鳥取':[35.50,134.24],'島根':[35.47,133.05],'岡山':[34.66,133.93],'広島':[34.40,132.46],'山口':[34.19,131.47],'徳島':[34.07,134.56],'香川':[34.34,134.04],'愛媛':[33.84,132.77],'高知':[33.56,133.53],'福岡':[33.61,130.42],'佐賀':[33.25,130.30],'長崎':[32.74,129.87],'熊本':[32.79,130.74],'大分':[33.24,131.61],'宮崎':[31.91,131.42],'鹿児島':[31.56,130.56],'沖縄':[26.21,127.68]};
+function norm(p){return p==='北海道'?p:String(p||'').replace(/[都府県]$/,'');}
+
+var TSUNAMI={None:'津波の心配なし',Unknown:'津波情報は不明',Checking:'津波の有無を調査中',NonEffective:'若干の海面変動(被害の心配なし)',Watch:'津波注意報が発表中',Warning:'津波警報等が発表中'};
+var GRADE={MajorWarning:['大津波警報',3],Warning:['津波警報',2],Watch:['津波注意報',1],Unknown:['津波予報',0]};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function fmtDepth(d){return (d==null||d<0)?'不明':(d===0?'ごく浅い':d+'km');}
+function fmtTime(t){return String(t||'').slice(5,16);}
+
+/* ---------- 時計(日本時間) ---------- */
+var fT=new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+var fD=new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'long',day:'numeric',weekday:'short'});
+var ctime=document.getElementById('ctime');
+var cdate=document.getElementById('cdate');
+function tick(){
+  var now=new Date();
+  var t=fT.format(now),d=fD.format(now);
+  if(ctime.textContent!==t)ctime.textContent=t;
+  if(cdate.textContent!==d)cdate.textContent=d;
+  updateElapsed();
+}
+
+/* ---------- 地図 ---------- */
+var map=L.map('map',{zoomControl:true,preferCanvas:true}).setView([37.5,137.5],5);
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',{maxZoom:18,attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>'}).addTo(map);
+var quakeLayer=L.layerGroup().addTo(map);
+var prefLayer=L.layerGroup().addTo(map);
+var eewLayer=L.layerGroup().addTo(map);
+
+var legend=document.getElementById('legend');
+[10,20,30,40,45,50,55,60,70].forEach(function(v){
+  var s=document.createElement('span');
+  s.textContent=sc(v)[0];
+  s.style.background=sc(v)[1];
+  s.style.color=fg(v);
+  legend.appendChild(s);
+});
+
+var quakes=new Map();
+var selectedKey=null;
+var seen=new Set();
+
+function sorted(){
+  return Array.from(quakes.values()).sort(function(a,b){return a.time<b.time?1:-1;});
+}
+
+function renderList(){
+  var el=document.getElementById('list');
+  var arr=sorted();
+  if(!arr.length){el.innerHTML='<div class="empty">表示できる地震情報がありません。</div>';return;}
+  el.innerHTML=arr.map(function(q){
+    var s=sc(q.maxScale);
+    return '<button type="button" class="item'+(q.key===selectedKey?' sel':'')+'" data-key="'+esc(q.key)+'">'
+      +'<span class="badge" style="background:'+s[1]+';color:'+fg(q.maxScale)+'">'+s[0]+'</span>'
+      +'<span><span class="n">'+esc(q.name)+'</span><br><span class="muted">'+esc(fmtTime(q.time))+' M'+(q.mag==null?'不明':q.mag)+' / '+esc(fmtDepth(q.depth))+'</span></span>'
+      +'</button>';
+  }).join('');
+}
+
+function renderMap(){
+  quakeLayer.clearLayers();
+  quakes.forEach(function(q){
+    if(q.lat==null)return;
+    var sel=q.key===selectedKey;
+    var m=L.circleMarker([q.lat,q.lng],{
+      radius:4+(q.mag||3)*1.6,
+      fillColor:sc(q.maxScale)[1],fillOpacity:.85,
+      color:sel?'#ffffff':'#12151a',weight:sel?2.5:1
+    });
+    m.bindTooltip(esc(q.name)+' M'+(q.mag==null?'?':q.mag));
+    m.on('click',function(){select(q.key,true);});
+    m.addTo(quakeLayer);
+  });
+}
+
+function prefMax(q){
+  var m=new Map();
+  q.points.forEach(function(p){
+    if(!p||p.scale==null||p.scale<10)return;
+    var k=norm(p.pref);
+    if(!m.has(k)||m.get(k)<p.scale)m.set(k,p.scale);
+  });
+  return m;
+}
+
+function renderDetail(q){
+  var el=document.getElementById('detail');
+  if(!q){el.innerHTML='<div class="muted">地震を選択してください</div>';return;}
+  var s=sc(q.maxScale);
+  var pm=prefMax(q);
+  var chips='';
+  Array.from(pm.entries()).sort(function(a,b){return b[1]-a[1];}).forEach(function(e){
+    chips+='<span class="pc"><i style="background:'+sc(e[1])[1]+'"></i>'+esc(e[0])+' '+sc(e[1])[0]+'</span>';
+  });
+  el.innerHTML='<div style="display:flex;gap:10px;align-items:center">'
+    +'<span class="badge big" style="background:'+s[1]+';color:'+fg(q.maxScale)+'">'+s[0]+'</span>'
+    +'<div><div style="font-size:15px;font-weight:700">'+esc(q.name)+'</div><div class="muted">'+esc(String(q.time).slice(0,16))+'</div></div></div>'
+    +'<div class="muted" style="margin-top:6px">M'+(q.mag==null?'不明':q.mag)+' / 深さ '+esc(fmtDepth(q.depth))+'<br>'+esc(TSUNAMI[q.tsunami]||'')+'</div>'
+    +(chips?'<div style="margin-top:8px"><div class="muted">都道府県ごとの最大震度</div>'+chips+'</div>':'');
+}
+
+function select(key,fly){
+  selectedKey=key;
+  var q=quakes.get(key);
+  renderList();
+  renderMap();
+  renderDetail(q);
+  prefLayer.clearLayers();
+  if(!q)return;
+  var pts=[];
+  if(q.lat!=null)pts.push([q.lat,q.lng]);
+  prefMax(q).forEach(function(v,k){
+    var c=CENT[k];
+    if(!c)return;
+    pts.push(c);
+    L.marker(c,{
+      interactive:false,keyboard:false,
+      icon:L.divIcon({className:'',iconSize:[0,0],html:'<div class="pm" style="background:'+sc(v)[1]+';color:'+fg(v)+'">'+esc(k)+' '+sc(v)[0]+'</div>'})
+    }).addTo(prefLayer);
+  });
+  if(fly&&pts.length){
+    if(pts.length===1)map.flyTo(pts[0],7);
+    else map.flyToBounds(L.latLngBounds(pts).pad(.3),{maxZoom:8});
+  }
+}
+
+document.getElementById('list').addEventListener('click',function(e){
+  var b=e.target.closest('.item');
+  if(b)select(b.getAttribute('data-key'),true);
+});
+
+/* ---------- バナー ---------- */
+var banners=new Map();
+function removeBanner(key){
+  var b=banners.get(key);
+  if(!b)return;
+  clearTimeout(b.timer);
+  b.el.remove();
+  banners.delete(key);
+  if(key==='eew')eewLayer.clearLayers();
+}
+function addBanner(key,cls,html,ttl){
+  removeBanner(key);
+  var el=document.createElement('div');
+  el.className='banner '+cls;
+  el.innerHTML='<div>'+html+'</div><button type="button" class="x" aria-label="閉じる">×</button>';
+  el.querySelector('.x').onclick=function(){removeBanner(key);};
+  document.getElementById('banners').appendChild(el);
+  var timer=ttl?setTimeout(function(){removeBanner(key);},ttl):null;
+  banners.set(key,{el:el,timer:timer});
+}
+
+/* ---------- 音 ---------- */
+var ac=null,soundOn=false;
+var snd=document.getElementById('snd');
+var aSnd=document.getElementById('a-snd');
+function setSound(on){
+  if(on){
+    try{
+      ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+      ac.resume();
+      soundOn=true;
+    }catch(_){soundOn=false;}
+  }else{
+    soundOn=false;
+  }
+  snd.textContent=soundOn?'音: ON':'音: OFF';
+  aSnd.hidden=soundOn;
+  if(soundOn&&on)beep(1);
+}
+snd.addEventListener('click',function(){setSound(!soundOn);});
+aSnd.addEventListener('click',function(){setSound(true);beep(3);});
+function beep(n){
+  if(!soundOn||!ac)return;
+  for(var i=0;i<n;i++){
+    var o=ac.createOscillator(),g=ac.createGain();
+    o.type='sine';
+    o.frequency.value=i%2?660:880;
+    g.gain.value=.15;
+    o.connect(g);g.connect(ac.destination);
+    var t=ac.currentTime+i*.35;
+    o.start(t);o.stop(t+.25);
+  }
+}
+
+/* ---------- 緊急地震速報の割り込み表示 ---------- */
+var alertEl=document.getElementById('alert');
+var aTitle=document.getElementById('a-title');
+var aSub=document.getElementById('a-sub');
+var aMain=document.getElementById('a-main');
+var aAreas=document.getElementById('a-areas');
+var aElapsed=document.getElementById('a-elapsed');
+var aClose=document.getElementById('a-close');
+var alertKey=null,alertStart=0,alertOpen=false,dismissedKey=null,closeTimer=null;
+
+function openAlert(){
+  alertEl.hidden=false;
+  alertOpen=true;
+  aSnd.hidden=soundOn;
+  document.title='【緊急地震速報】'+BASE_TITLE;
+  try{aClose.focus();}catch(_){}
+  updateElapsed();
+}
+function closeAlert(){
+  alertEl.hidden=true;
+  alertOpen=false;
+  clearTimeout(closeTimer);
+  document.title=BASE_TITLE;
+}
+function updateElapsed(){
+  if(!alertOpen||!alertStart)return;
+  aElapsed.textContent='受信から'+Math.max(0,Math.floor((Date.now()-alertStart)/1000))+'秒経過';
+}
+aClose.addEventListener('click',function(){dismissedKey=alertKey;closeAlert();});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&alertOpen){dismissedKey=alertKey;closeAlert();}
+});
+
+/* ---------- データ処理 ---------- */
+function toQuake(d){
+  var e=d.earthquake;
+  if(!e)return null;
+  if(d.issue&&d.issue.type==='Foreign')return null;
+  var h=e.hypocenter||{};
+  var ok=h.latitude>-100&&h.longitude>-100;
+  return {
+    key:e.time,issued:d.time||'',time:e.time,
+    name:h.name||'震源を調査中',
+    lat:ok?h.latitude:null,lng:ok?h.longitude:null,
+    depth:h.depth,mag:(h.magnitude>=0)?h.magnitude:null,
+    maxScale:(e.maxScale==null)?-1:e.maxScale,
+    tsunami:e.domesticTsunami,points:d.points||[]
+  };
+}
+
+function onQuake(d,live){
+  var q=toQuake(d);
+  if(!q)return;
+  var old=quakes.get(q.key);
+  if(old){
+    if(old.issued>q.issued)return;
+    if(!q.points.length)q.points=old.points;
+    if(q.lat==null){q.lat=old.lat;q.lng=old.lng;}
+    if(q.maxScale<0)q.maxScale=old.maxScale;
+  }
+  quakes.set(q.key,q);
+  if(quakes.size>60){
+    var oldest=sorted().pop();
+    if(oldest)quakes.delete(oldest.key);
+  }
+  if(live){
+    addBanner('q'+q.key,'info','<b>地震情報</b>'+esc(fmtTime(q.time))+' '+esc(q.name)+' 最大震度'+esc(sc(q.maxScale)[0]),25000);
+    if(!old||q.key===selectedKey){select(q.key,!old);return;}
+  }
+  renderList();
+  renderMap();
+}
+
+function onEEW(d){
+  var e=d.earthquake||{},h=e.hypocenter||{};
+  if(d.cancelled){
+    removeBanner('eew');
+    alertKey=null;
+    if(alertOpen){
+      aTitle.textContent='緊急地震速報は取り消されました';
+      aSub.textContent='まもなくこの画面を閉じます';
+      clearTimeout(closeTimer);
+      closeTimer=setTimeout(closeAlert,6000);
+    }
+    return;
+  }
+  var key=e.originTime||h.name||'eew';
+  var isNew=key!==alertKey;
+  alertKey=key;
+  if(isNew){alertStart=Date.now();dismissedKey=null;}
+  clearTimeout(closeTimer);
+
+  var names=(d.areas||[]).map(function(a){return a.name;}).filter(Boolean);
+  var meta='M'+(h.magnitude>=0?h.magnitude:'不明')+' / 深さ '+fmtDepth(h.depth);
+
+  aTitle.textContent='緊急地震速報'+(d.test?'【テスト】':'');
+  aSub.textContent='強い揺れに警戒してください';
+  aMain.innerHTML='<div class="a-name">'+esc(h.name||'震源を調査中')+'</div><div class="a-meta">'+esc(meta)+'</div>';
+  aAreas.innerHTML=names.length
+    ?'<div class="a-label">強い揺れが予想される地域</div><div class="a-list">'
+      +names.slice(0,16).map(function(n){return '<span>'+esc(n)+'</span>';}).join('')
+      +(names.length>16?'<span>ほか'+(names.length-16)+'区域</span>':'')+'</div>'
+    :'';
+  if(dismissedKey!==key)openAlert();
+
+  var txt=esc(h.name||'震源を調査中')+' '+esc(meta);
+  if(names.length)txt+='<br>対象: '+esc(names.slice(0,8).join('、'))+(names.length>8?' ほか':'');
+  addBanner('eew','eew','<b>緊急地震速報(警報)'+(d.test?'【テスト】':'')+'</b>'+txt,180000);
+
+  eewLayer.clearLayers();
+  if(h.latitude>-100&&h.longitude>-100){
+    L.marker([h.latitude,h.longitude],{
+      interactive:false,keyboard:false,
+      icon:L.divIcon({className:'',iconSize:[0,0],html:'<div class="eew"><i></i><i></i><i></i><b>×</b></div>'})
+    }).addTo(eewLayer);
+    if(isNew)map.flyTo([h.latitude,h.longitude],6);
+  }
+  if(isNew)beep(3);
+}
+
+function onTsunami(d){
+  if(d.cancelled){
+    removeBanner('tsu');
+    addBanner('tsuc','info','<b>津波予報</b>津波に関する予報は解除されました',20000);
+    return;
+  }
+  var areas=d.areas||[];
+  var top=GRADE.Unknown;
+  areas.forEach(function(a){var g=GRADE[a.grade]||GRADE.Unknown;if(g[1]>top[1])top=g;});
+  addBanner('tsu','tsu','<b>'+esc(top[0])+'</b>'+areas.length+'区域に発表されています。海岸から離れ、公式情報を確認してください。',0);
+}
+
+function handle(d,live){
+  if(!d||!d.code)return;
+  if(live&&d.id){
+    if(seen.has(d.id))return;
+    seen.add(d.id);
+    if(seen.size>500)seen.delete(seen.values().next().value);
+  }
+  if(d.code===551)onQuake(d,live);
+  else if(live&&d.code===556)onEEW(d);
+  else if(live&&d.code===552)onTsunami(d);
+}
+
+/* ---------- 通信 ---------- */
+function setStatus(text,cls){
+  var s=document.getElementById('status');
+  s.textContent=text;
+  s.className='chip '+cls;
+}
+
+var firstLoad=true;
+function loadHistory(){
+  return fetch(API).then(function(r){
+    if(!r.ok)throw new Error(r.status);
+    return r.json();
+  }).then(function(arr){
+    arr.slice().reverse().forEach(function(d){handle(d,false);});
+    renderList();
+    if(firstLoad){
+      firstLoad=false;
+      var latest=sorted()[0];
+      if(latest)select(latest.key,true);else renderDetail(null);
+    }else{
+      renderMap();
+    }
+  }).catch(function(){
+    if(firstLoad){
+      document.getElementById('list').innerHTML='<div class="empty">地震情報を取得できませんでした。接続が回復すると自動で再取得します。</div>';
+      document.getElementById('detail').innerHTML='';
+    }
+  });
+}
+
+var retry=0,ws=null,retryTimer=null;
+function schedule(){
+  clearTimeout(retryTimer);
+  var wait=Math.min(10000,1000*Math.pow(2,retry));
+  retry++;
+  retryTimer=setTimeout(connect,wait);
+}
+function connect(){
+  clearTimeout(retryTimer);
+  if(ws&&(ws.readyState===0||ws.readyState===1))return;
+  if(retry)setStatus('再接続中…自動で再試行しています','ng');
+  else setStatus('接続中…','wait');
+  var sock;
+  try{sock=new WebSocket(WS);}catch(_){schedule();return;}
+  ws=sock;
+  sock.onopen=function(){
+    if(sock!==ws)return;
+    retry=0;
+    setStatus('リアルタイム受信中','ok');
+    loadHistory();
+  };
+  sock.onmessage=function(e){
+    if(sock!==ws)return;
+    try{handle(JSON.parse(e.data),true);}catch(_){}
+  };
+  sock.onclose=function(){
+    if(sock!==ws)return;
+    setStatus('再接続中…自動で再試行しています','ng');
+    schedule();
+  };
+  sock.onerror=function(){try{sock.close();}catch(_){}};
+}
+function reconnectNow(){
+  if(ws&&ws.readyState===1)return false;
+  retry=0;
+  connect();
+  return true;
+}
+
+window.addEventListener('online',reconnectNow);
+window.addEventListener('pageshow',function(e){if(e.persisted)reconnectNow();});
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState!=='visible')return;
+  if(!reconnectNow())loadHistory();
+});
+
+setInterval(tick,250);
+tick();
+connect();
+})();
+</script>
+</body>
+</html>
